@@ -1,13 +1,18 @@
-from fastapi import FastAPI, File, UploadFile
+from fastapi import FastAPI, File
+from segmentation import get_yolov5, get_image_from_bytes
 from starlette.responses import Response
 import io
+from PIL import Image
 import json
 from fastapi.middleware.cors import CORSMiddleware
-from moviepy.editor import VideoFileClip  # For handling video files
+
+
+model = get_yolov5()
 
 app = FastAPI(
     title="Custom YOLOV5 Machine Learning API",
-    description="Obtain object value out of video and return json result",
+    description="""Obtain object value out of image
+                    and return image and json result""",
     version="0.0.1",
 )
 
@@ -25,21 +30,41 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-@app.post("/object-to-json")
-async def detect_video_return_json_result(file: UploadFile = File(...)):
-    # Save the uploaded video to a temporary location
-    video_contents = await file.read()
 
-    # Save the video to a file (optional, depending on how you plan to process it)
-    with open("temp_video.mp4", "wb") as f:
-        f.write(video_contents)
+@app.get('/notify/v1/health')
+def get_health():
+    """
+    Usage on K8S
+    readinessProbe:
+        httpGet:
+            path: /notify/v1/health
+            port: 80
+    livenessProbe:
+        httpGet:
+            path: /notify/v1/health
+            port: 80
+    :return:
+        dict(msg='OK')
+    """
+    return dict(msg='OK')
 
-    # Process the video file using moviepy or your YOLOv5 model
-    clip = VideoFileClip("temp_video.mp4")
-    # Example: process each frame (this is placeholder logic)
-    # You would run YOLOv5 on each frame or extract keyframes for detection.
-    
-    # Placeholder: assume we extract some results for the frames
-    results = {"frames_detected": [{"frame": 1, "objects": ["object1", "object2"]}]}
-    
-    return {"result": results}
+
+@app.post("/predict")
+async def detect_food_return_json_result(file: bytes = File(...)):
+    input_image = get_image_from_bytes(file)
+    results = model(input_image)
+    detect_res = results.pandas().xyxy[0].to_json(orient="records")  # JSON img1 predictions
+    detect_res = json.loads(detect_res)
+    return {"result": detect_res}
+
+
+# @app.post("/object-to-img")
+# async def detect_food_return_base64_img(file: bytes = File(...)):
+#     input_image = get_image_from_bytes(file)
+#     results = model(input_image)
+#     results.render()  # updates results.imgs with boxes and labels
+#     for img in results.imgs:
+#         bytes_io = io.BytesIO()
+#         img_base64 = Image.fromarray(img)
+#         img_base64.save(bytes_io, format="jpeg")
+#     return Response(content=bytes_io.getvalue(), media_type="image/jpeg")
